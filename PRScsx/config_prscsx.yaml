@@ -1,0 +1,25 @@
+bim: 'Sumstats_Bim_File.bim'
+bim_prefix: 'Sumstats_Bim_File'
+prscsx_python: PRScs/bin/python
+train_pheno: 'Lymphocyte_Count'
+prscsx_script_directory: 'PRScsx.py'
+reference_directory: 'ID_Reference/'
+output_directory: 'PRS_Output/'
+cleaned_sumstats_prefix: 'cleaned/'
+cleaned_sumstats_suffix: '_hg19_sumstats_cleaned'
+LD_panel_cohort: '1kg'
+pop_list: 'EUR,AFR'
+
+ancestry:
+  EUR:
+    sumstats: 'eur_test.txt'
+    sumstats_colnames: 'chromosome base_pair_location effect_allele other_allele effect_allele_frequency beta standard_error p_value odds_ratio ci_lower ci_upper variant_id'
+    chr_colnum: '1'
+    pos_colnum: '2'
+    sample_size: '524923'
+  AFR:
+    sumstats: 'afr_test.txt'
+    sumstats_colnames: 'chromosome base_pair_location effect_allele other_allele effect_allele_frequency beta standard_error p_value odds_ratio ci_lower ci_upper variant_id'
+    chr_colnum: '1'
+    pos_colnum: '2'
+    sample_size: '13477'

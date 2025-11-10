@@ -1,0 +1,162 @@
+configfile:'config_prscsx.yaml'
+
+AUTOSOMES = list(range(1, 23))
+
+rule all:
+    input:
+        expand(config['output_directory'] + config['train_pheno'] + '_{ancestry_label}_PRScsx_Output.txt', ancestry_label = config['ancestry'])
+
+rule clean_sumstats:
+    output:
+        config['cleaned_sumstats_prefix'] + '{ancestry_label}' + config['cleaned_sumstats_suffix']
+    input:
+        lambda wildcards: config['ancestry'][wildcards.ancestry_label]['sumstats']
+    params:
+        sumstats_colnames = lambda wildcards: config['ancestry'][wildcards.ancestry_label]['sumstats_colnames'],
+        chr_colnum = lambda wildcards: config['ancestry'][wildcards.ancestry_label]['chr_colnum'],
+        pos_colnum = lambda wildcards: config['ancestry'][wildcards.ancestry_label]['pos_colnum']
+
+    shell:
+        """
+        zcat {input} | grep -v -E 'I|D' | sed 's/\t/ /g' > {wildcards.ancestry_label}_no_indel
+        grep -i 'e+' {wildcards.ancestry_label}_no_indel > {wildcards.ancestry_label}_exponents
+        if  [ -f {wildcards.ancestry_label}_exponents ];then
+            grep -i -v 'e+' {wildcards.ancestry_label}_no_indel > {wildcards.ancestry_label}_no_exponents
+            awk '{{print ${params.pos_colnum}}}' {wildcards.ancestry_label}_exponents > {wildcards.ancestry_label}_exponents_bp_only
+            awk '{{for (i= 1;i<=NF;i++) if ($i+0 == $i && $i ~ /e/) $i = sprintf("%5.0f", $i)}} 1' {wildcards.ancestry_label}_exponents_bp_only > {wildcards.ancestry_label}_exponents_bp_converted
+            paste {wildcards.ancestry_label}_exponents {wildcards.ancestry_label}_exponents_bp_converted > {wildcards.ancestry_label}_exponents_converted
+            awk '{{for(i={params.chr_colnum};i<{params.chr_colnum};i++) printf $i" "; print ""}}' {wildcards.ancestry_label}_exponents_converted | sed '/^$/d' > {wildcards.ancestry_label}_before_chrcol
+            awk '{{print ${params.chr_colnum}}}' {wildcards.ancestry_label}_exponents_converted > {wildcards.ancestry_label}_chrcol
+            awk '{{for(i=({params.chr_colnum}+1);i<{params.pos_colnum};i++) printf $i" "; print ""}}' {wildcards.ancestry_label}_exponents_converted | sed '/^$/d' > {wildcards.ancestry_label}_between_chrcol_poscol
+            awk '{{for(i=({params.pos_colnum}+1);i<NF;i++) printf $i" "; print ""}}' {wildcards.ancestry_label}_exponents_converted | sed '/^$/d' > {wildcards.ancestry_label}_after_poscol
+            awk '{{print $NF}}' {wildcards.ancestry_label}_exponents_converted > {wildcards.ancestry_label}_new_poscol
+            if [[ -s {wildcards.ancestry_label}_before_chrcol ]] && [[ -s {wildcards.ancestry_label}_between_chrcol_poscol ]] && [[ -s {wildcards.ancestry_label}_after_poscol ]];then
+                echo "no files empty"
+                paste {wildcards.ancestry_label}_before_chrcol {wildcards.ancestry_label}_chrcol {wildcards.ancestry_label}_between_chrcol_poscol {wildcards.ancestry_label}_new_poscol {wildcards.ancestry_label}_after_poscol > {wildcards.ancestry_label}_exponents_converted_updated
+            elif [[ -s {wildcards.ancestry_label}_before_chrcol ]] && [[ -s {wildcards.ancestry_label}_between_chrcol_poscol ]]; then
+                echo "after pos file empty"
+                paste {wildcards.ancestry_label}_before_chrcol {wildcards.ancestry_label}_chrcol {wildcards.ancestry_label}_between_chrcol_poscol {wildcards.ancestry_label}_new_poscol > {wildcards.ancestry_label}_exponents_converted_updated
+            elif [[ -s {wildcards.ancestry_label}_before_chrcol ]] && [[ -s {wildcards.ancestry_label}_after_poscol ]]; then  
+                echo "between chr and pos file empty"
+                paste {wildcards.ancestry_label}_before_chrcol {wildcards.ancestry_label}_chrcol {wildcards.ancestry_label}_new_poscol {wildcards.ancestry_label}_after_poscol > {wildcards.ancestry_label}_exponents_converted_updated
+            elif [[ -s {wildcards.ancestry_label}_between_chrcol_poscol ]] && [[ -s {wildcards.ancestry_label}_after_poscol ]]; then
+                echo "before chr file empty"
+                paste {wildcards.ancestry_label}_chrcol {wildcards.ancestry_label}_between_chrcol_poscol {wildcards.ancestry_label}_new_poscol {wildcards.ancestry_label}_after_poscol > {wildcards.ancestry_label}_exponents_converted_updated
+            elif [[ -s {wildcards.ancestry_label}_before_chrcol ]]; then
+                echo "between chr and pos and after pos files empty"
+                paste {wildcards.ancestry_label}_before_chrcol {wildcards.ancestry_label}_chrcol {wildcards.ancestry_label}_new_poscol > {wildcards.ancestry_label}_exponents_converted_updated
+            elif [[ -s {wildcards.ancestry_label}_between_chrcol_poscol ]]; then
+                echo "before chr and after pos files empty"
+                paste {wildcards.ancestry_label}_chrcol {wildcards.ancestry_label}_between_chrcol_poscol {wildcards.ancestry_label}_new_poscol > {wildcards.ancestry_label}_exponents_converted_updated
+            elif [[ -s {wildcards.ancestry_label}_after_poscol ]]; then
+                echo "between chr and pos and before chr files empty"
+                paste {wildcards.ancestry_label}_chrcol {wildcards.ancestry_label}_new_poscol {wildcards.ancestry_label}_after_poscol > {wildcards.ancestry_label}_exponents_converted_updated
+            else
+                echo "ERROR"
+            fi
+            cat {wildcards.ancestry_label}_no_exponents {wildcards.ancestry_label}_exponents_converted_updated | awk 'BEGIN {{print "{params.sumstats_colnames} CHR:POS"}} NR>1 {{print $0, ${params.chr_colnum}":"${params.pos_colnum}}}' > {output}
+            rm *no_indel *exponents* *col*
+        else
+            awk 'BEGIN {{print "{params.sumstats_colnames} CHR:POS"}} NR>1 {{print $0, ${params.chr_colnum}":"${params.pos_colnum}}}' {wildcards.ancestry_label}_no_indel > {output}
+            rm *no_indel
+        fi
+        """
+
+rule add_id_to_snp:
+    output:
+        config['reference_directory'] + 'snpinfo_mult_' + config['LD_panel_cohort'] + '_hm3_id'
+    input:
+        config['reference_directory'] + 'snpinfo_mult_' + config['LD_panel_cohort'] + '_hm3'
+    shell:
+        """
+        awk 'BEGIN {{print "RSID CHR:POS"}} NR>1 {{print $2, $1":"$3}}' {input} > {output}
+        """
+
+rule make_prs_input_and_bim:
+    output:
+        sumstats = '{ancestry_label}_PRScsx_Input.txt',
+        bim = '{ancestry_label}_bim'
+    input:
+        sumstats = config['cleaned_sumstats_prefix'] + '{ancestry_label}' + config['cleaned_sumstats_suffix'],
+        snp = config['reference_directory'] + 'snpinfo_mult_' + config['LD_panel_cohort'] + '_hm3_id'
+    resources:
+        mem_mb = 100000
+    run:
+        import pandas as pd
+
+        sumstats =pd.read_table(input['sumstats'], sep = ' ', low_memory = False)
+        snp = pd.read_table(input['snp'], sep = ' ')
+
+        merge =sumstats.merge(snp, how = 'inner', on = 'CHR:POS')
+
+        bim =merge.copy()
+        bim['zero']=0
+        bim.drop(columns = ['effect_allele_frequency', 'beta', 'standard_error', 'odds_ratio', 'p_value', 'CHR:POS', 'ci_lower', 'ci_upper', 'variant_id'], inplace =True)
+        bim =bim[['chromosome', 'RSID', 'zero', 'base_pair_location', 'effect_allele', 'other_allele']]
+
+        bim.to_csv(str(output['bim']), sep = '\t', index = False, header = False)
+
+        merge.drop(columns = ['chromosome', 'base_pair_location', 'effect_allele_frequency', 'standard_error', 'odds_ratio', 'CHR:POS', 'ci_lower', 'ci_upper', 'variant_id'], inplace =True)
+        merge =merge[['RSID', 'effect_allele', 'other_allele', 'beta', 'p_value']]
+        merge.rename(columns ={'RSID' : 'SNP', 'effect_allele' : 'A1', 'other_allele' : 'A2', 'beta' : 'BETA', 'p_value' : 'P'}, inplace =True)
+
+        merge.to_csv(str(output['sumstats']), sep = '\t', index = False)
+
+rule cat_bim:
+    output:
+        config['bim']
+    input:
+        expand('{ancestry_label}_bim', ancestry_label = config['ancestry'])
+    shell:
+        """
+        cat {input} > {output}
+        """
+
+rule prscsx:
+    output:
+        expand(config['output_directory'] + config['train_pheno'] + '_PRScsx_{ancestry_label}_pst_eff_a1_b0.5_phiauto_chr{{chr}}.txt', ancestry_label = config['ancestry'])
+    input:
+        sumstats = expand('{ancestry_label}_PRScsx_Input.txt', ancestry_label = config['ancestry']),
+        bim = config['bim']
+    resources:
+        mem_mb = 100000
+    params:
+        bim_prefix = config['bim_prefix'],
+        python = config['prscsx_python'],
+        sumstats = '_PRScsx_Input.txt,'.join(config['ancestry']) + '_PRScsx_Input.txt',
+        pop_list = ','.join(config['ancestry']),
+        pheno = config['train_pheno'],
+        ref_dir = config['reference_directory'],
+        sample_size = lambda wildcards: ','.join([config['ancestry'][label]['sample_size'] for label in config['ancestry'].keys()]),
+        prscsx_script_directory = config['prscsx_script_directory'],
+        out_dir = config['output_directory']
+    shell:
+        """
+        {params.python} {params.prscsx_script_directory} \
+        --ref_dir={params.ref_dir} \
+        --bim_prefix={params.bim_prefix} \
+        --sst_file={params.sumstats} \
+        --n_gwas={params.sample_size} \
+        --pop={params.pop_list} \
+        --out_dir={params.out_dir} \
+        --out_name={params.pheno}_PRScsx \
+        --chrom={wildcards.chr} \
+        --seed=7
+        """
+
+rule concat_PRS_outputs:
+    output:
+        config['output_directory'] + config['train_pheno'] + '_{ancestry_label}_PRScsx_Output.txt'
+    input:
+        expand(config['output_directory'] + config['train_pheno'] + '_PRScsx_{{ancestry_label}}_pst_eff_a1_b0.5_phiauto_chr{chr}.txt',chr=AUTOSOMES)
+    run:
+        import pandas as pd
+
+        dfs = []
+        for f in input:
+            print(f)
+            dfs.append(pd.read_table(f, sep = '\t', header =None))
+
+        df = pd.concat(dfs)
+        print(df)
+        df.to_csv(str(output), sep = '\t', index = False, header = False)

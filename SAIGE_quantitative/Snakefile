@@ -1,0 +1,215 @@
+configfile: 'config_saige_gwas.yaml'
+
+include: 'biofilter_wrapper/Snakefile'
+
+AUTOSOMES = list(range(1, 23))
+
+rule make_cleaned_sample_list:
+    output:
+        '{ancestry_label}_SAIGE_Input_Cleaned.bim',
+        '{ancestry_label}_SAIGE_Input_Cleaned.bed',
+        '{ancestry_label}_SAIGE_Input_Cleaned.fam'
+    input:
+        plink_set = expand(config['sample_plink_prefix'] + '{ext}', ext = config['sample_plink_ext']),
+        pheno_sample = 'keep_' + config['pheno_name'] + '.txt',
+        cohort_sample = 'keep_{ancestry_label}.txt',
+        longrange = 'Longrange_Regions/longrange_LD_hg' + config['build'] + '.bed'
+    params:
+        sample_plink_flag = config['sample_plink_flag'],
+        plink_prefix = config['sample_plink_prefix'],
+        pheno_name = config['pheno_name'],
+        plink_geno = config['plink_geno'],
+        plink_mind = config['plink_mind'],
+        plink_maf = config['plink_maf'],
+        plink_hwe = config['plink_hwe'],
+        output_prefix = '{ancestry_label}_SAIGE_Input_Cleaned'
+    shell:
+        """
+        plink --bfile {params.plink_prefix} \
+        --keep-fam {input.pheno_sample} \
+        --make-bed --out {params.pheno_name}
+
+        plink --bfile {params.pheno_name}\
+        --keep-fam {input.cohort_sample} \
+        --exclude range {input.longrange} \
+        --maf {params.plink_maf} \
+        --geno {params.plink_geno} \
+        --mind {params.plink_mind} \
+        --hwe {params.plink_hwe} \
+        --autosome \
+        --make-bed \
+        --out {params.output_prefix}
+        """
+
+rule create_filtered_snplist:
+    output:
+        'snplist/{ancestry_label}_filtered_snplist_chr{chr}.snplist'
+    input:
+        plink_set = expand(
+            config['plink_chr_prefix'] + '{{chr}}{ext}' + config['plink_chr_suffix'], ext = config['snplist_plink_ext']),
+        longrange = 'Longrange_Regions/longrange_LD_hg' + config['build'] + '.bed',
+        sample = '{ancestry_label}_SAIGE_Input_Cleaned.fam'
+    params:
+        snplist_plink_flag = config['snplist_plink_flag'],
+        plink_prefix = config['plink_chr_prefix'] + '{chr}' + config['plink_chr_suffix'],
+        plink_geno = config['plink_geno'],
+        plink_mind = config['plink_mind'],
+        plink_maf = config['plink_maf'],
+        plink_hwe = config['plink_hwe'],
+        output_prefix = 'snplist/{ancestry_label}_filtered_snplist_chr{chr}'
+    shell:
+        """
+        plink {params.snplist_plink_flag} {params.plink_prefix} \
+        --extract extract_Rsq_gt_0.3.txt \
+        --exclude range {input.longrange} \
+        --keep-fam {input.sample} \
+        --geno {params.plink_geno} \
+        --mind {params.plink_mind} \
+        --maf {params.plink_maf} \
+        --hwe {params.plink_hwe} \
+        --write-snplist \
+        --out {params.output_prefix}
+        """
+
+rule remove_multialleic_variants:
+    output:
+        'snplist/{ancestry_label}_filtered_snplist_multiallelic_removed_chr{chr}.snplist'
+    input:
+        'snplist/{ancestry_label}_filtered_snplist_chr{chr}.snplist'
+    shell:
+        """
+        sed 's/chr//g' {input} > snplist/{wildcards.ancestry_label}_chr{wildcards.chr}_no_chr
+        sed 's/:/_/3' snplist/{wildcards.ancestry_label}_chr{wildcards.chr}_no_chr > snplist/{wildcards.ancestry_label}_chr{wildcards.chr}_a1_temp
+        sed 's|_.*||' snplist/{wildcards.ancestry_label}_chr{wildcards.chr}_a1_temp > snplist/{wildcards.ancestry_label}_chr{wildcards.chr}_no_a1
+        sed 's|.*:||' snplist/{wildcards.ancestry_label}_chr{wildcards.chr}_no_chr > snplist/{wildcards.ancestry_label}_chr{wildcards.chr}_a1
+        sed 's/:/_/2' snplist/{wildcards.ancestry_label}_chr{wildcards.chr}_no_a1 > snplist/{wildcards.ancestry_label}_chr{wildcards.chr}_a2_temp
+        sed 's|_.*||' snplist/{wildcards.ancestry_label}_chr{wildcards.chr}_a2_temp > snplist/{wildcards.ancestry_label}_chr{wildcards.chr}_no_a2
+        sed 's|.*:||' snplist/{wildcards.ancestry_label}_chr{wildcards.chr}_no_a1 > snplist/{wildcards.ancestry_label}_chr{wildcards.chr}_a2
+        uniq -d snplist/{wildcards.ancestry_label}_chr{wildcards.chr}_no_a2 > snplist/{wildcards.ancestry_label}_chr{wildcards.chr}_multi_allelic
+        paste snplist/{wildcards.ancestry_label}_chr{wildcards.chr}_no_a2 snplist/{wildcards.ancestry_label}_chr{wildcards.chr}_a2 snplist/{wildcards.ancestry_label}_chr{wildcards.chr}_a1 > snplist/{wildcards.ancestry_label}_chr{wildcards.chr}_chr_bp_a2_a1
+        awk 'FILENAME == "snplist/{wildcards.ancestry_label}_chr{wildcards.chr}_multi_allelic" {{a[$1]=$1}} FILENAME == "snplist/{wildcards.ancestry_label}_chr{wildcards.chr}_chr_bp_a2_a1" {{if(!a[$1]) {{print $0}}}}' snplist/{wildcards.ancestry_label}_chr{wildcards.chr}_multi_allelic snplist/{wildcards.ancestry_label}_chr{wildcards.chr}_chr_bp_a2_a1 > snplist/{wildcards.ancestry_label}_chr{wildcards.chr}_no_multi_allelic
+        awk '{{print "chr"$1":"$2":"$3}}' snplist/{wildcards.ancestry_label}_chr{wildcards.chr}_no_multi_allelic > {output}
+        """
+
+rule step1:
+    output:
+        'step1/step1_{ancestry_label}.rda',
+        'step1/step1_{ancestry_label}.varianceRatio.txt'
+    input:
+        sample = expand('{{ancestry_label}}_SAIGE_Input_Cleaned{ext}', ext = config['sample_plink_ext']),
+        pheno_covar = '{ancestry_label}_phenotype_covariates.txt'
+    params:
+        pheno_name = config['pheno_name'],
+        inverse_normal_pheno = config['inverse_normal_pheno'],
+        pheno_covar_colnames = config['pheno_covar_colnames'],
+        output_prefix = 'step1/step1_{ancestry_label}',
+        sample_prefix = '{ancestry_label}_SAIGE_Input_Cleaned'
+    threads: 8
+    shell:
+        """
+        module load lapack/3.8.0
+        Rscript SAIGE/extdata/step1_fitNULLGLMM.R \
+        --plinkFile={params.sample_prefix} \
+        --phenoFile={input.pheno_covar} \
+        --phenoCol={params.pheno_name} \
+        --covarColList={params.pheno_covar_colnames} \
+        --sampleIDColinphenoFile=IID \
+        --traitType=quantitative \
+        --invNormalize={params.inverse_normal_pheno} \
+        --nThreads=64 \
+        --IsOverwriteVarianceRatioFile=TRUE \
+        --outputPrefix={params.output_prefix}
+        """
+
+rule step2:
+    output:
+        'step2/step2_{ancestry_label}_chr{chr}.txt'
+    input:
+        bgen_file = 'plink_chr{chr}.bgen',
+        bgen_file_index = 'plink_chr{chr}.bgen.bgi',
+        bgen_sample = 'plink_bgen.sample',
+        snplist = 'snplist/{ancestry_label}_filtered_snplist_multiallelic_removed_chr{chr}.snplist',
+        step1_rda = 'step1/step1_{ancestry_label}.rda',
+        step1_variance_ratio = 'step1/step1_{ancestry_label}.varianceRatio.txt'
+    shell:
+        """
+        module load lapack/3.8.0
+        Rscript SAIGE/extdata/step2_SPAtests.R \
+        --bgenFile={input.bgen_file} \
+        --bgenFileIndex={input.bgen_file_index} \
+        --sampleFile={input.bgen_sample} \
+        --AlleleOrder=ref-first \
+        --idstoIncludeFile={input.snplist} \
+        --chrom=chr{wildcards.chr} \
+        --minMAC=20 \
+        --GMMATmodelFile={input.step1_rda} \
+        --varianceRatioFile={input.step1_variance_ratio} \
+        --LOCO=TRUE \
+        --is_Firth_beta=TRUE \
+        --pCutoffforFirth=0.05 \
+        --is_output_moreDetails=TRUE \
+        --SAIGEOutputFile={output}
+        """
+
+rule merge_step2_output:
+    output:
+        plot_input = 'output_cleaning/SAIGE_{ancestry_label}_plot_input.txt',
+        sumstats_cleaned = 'output_cleaning/SAIGE_{ancestry_label}_output_cleaned.txt'
+    input:
+        expand('step2/step2_{{ancestry_label}}_chr{chr}.txt', chr = AUTOSOMES)
+    params:
+        input_single_chrom = 'step2/step2_{ancestry_label}_chr1.txt'
+    shell:
+        """
+        cat {input} | grep -v CHR > output_cleaning/step2_{wildcards.ancestry_label}_cat
+        head -1 {params.input_single_chrom} > output_cleaning/step2_{wildcards.ancestry_label}_header
+        cat output_cleaning/step2_{wildcards.ancestry_label}_header output_cleaning/step2_{wildcards.ancestry_label}_cat > output_cleaning/SAIGE_{wildcards.ancestry_label}_output.txt
+        awk '{{print $1, $2, $3, $4, $5, $7, $9, $10, $13}}' output_cleaning/SAIGE_{wildcards.ancestry_label}_output.txt > {output.sumstats_cleaned}
+        awk '{{print $1, $2, $3, $9}}' {output.sumstats_cleaned} > {output.plot_input}
+        sed -i 's/X/23/' {output.plot_input}
+        sed -i 's/chr//' {output.plot_input}
+        """
+
+rule make_suggestive_input:
+    output:
+        'output_cleaning/saige_{ancestry_label}_sumstats'
+    input:
+        'output_cleaning/SAIGE_{ancestry_label}_output_cleaned.txt'
+    shell:
+        """
+        sed 's/chr//g' {input} > {output}
+        """
+
+rule get_saige_suggestive_snps:
+    output:
+        'suggestive/saige_{ancestry_label}_suggestive.txt'
+    input:
+        'output_cleaning/saige_{ancestry_label}_sumstats'
+    params:
+        p_col = lambda wildcards: 9
+    shell:
+        """
+        awk '{{if (NR == 1 || ${params.p_col} <= 1E-5) {{print $1, "chr"$3, $2, ${params.p_col}}}}}' {input} > {output}
+        """
+
+rule get_saige_suggestive_input:
+    output:
+        'Annotations/saige_suggestive_biofilter_input_positions.txt'
+    input:
+        expand('suggestive/saige_{ancestry_label}_suggestive.txt', ancestry_label = ['EUR', 'AFR'])
+    resources: mem_mb = 12000
+    shell:
+        """
+        cat {input} | awk '{{print $1, $2, $3}}' | sort -n | uniq > {output}
+        """
+
+rule make_known_genes_file:
+    output:
+        'known_genes.txt'
+    input:
+        'Annotations/saige_suggestive_biofilter_genes_rsids.csv'
+    shell:
+        """
+        sed -i 's/,/\t/g' {input}
+        awk 'NR>1 {{print $5}}' {input} > {output}
+        """

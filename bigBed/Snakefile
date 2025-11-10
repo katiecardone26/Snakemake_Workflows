@@ -1,0 +1,223 @@
+include: 'liftover_wrapper/Snakefile'
+configfile: 'config_bigBed.yaml'
+
+n_files = list(range(100, 200))
+
+rule final:
+    input:
+        expand(config['output_dir'] + '{cohort}_' + config['output_build'] + '_bigBed_liftOver_outputs.txt',cohort= config['input'])
+
+rule split_file:
+    output:
+        expand(config['output_dir'] + 'input/{{cohort}}/x{n_files}', n_files = n_files)
+    input:
+        lambda wildcards: config['input'][wildcards.cohort]['input_filename']
+    params:
+        rsid_col = lambda wildcards: config['input'][wildcards.cohort]['rsid_col'],
+        read_cmd = lambda wildcards: 'zcat' if '.gz' in config['input'][wildcards.cohort]['input_filename'] else 'cat',
+        output_dir = config['output_dir']
+    shell:
+        """
+        if  [ -d {params.output_dir} ]; then
+            if [ ! -d {params.output_dir}input/ ]; then
+                mkdir {params.output_dir}input/
+            elif [ ! -d {params.output_dir}input/{wildcards.cohort}/ ]; then
+                mkdir {params.output_dir}input/{wildcards.cohort}/
+            fi
+        else
+            mkdir {params.output_dir}
+            mkdir {params.output_dir}input/ 
+            mkdir {params.output_dir}input/{wildcards.cohort}/
+        fi
+        {params.read_cmd} {input} | awk '{{print ${params.rsid_col}}}' > {params.output_dir}input/{wildcards.cohort}/{wildcards.cohort}_RSID_input
+        split -n 100 -d {params.output_dir}input/{wildcards.cohort}/{wildcards.cohort}_RSID_input {params.output_dir}input/{wildcards.cohort}/x1
+        rm {params.output_dir}input/{wildcards.cohort}/{wildcards.cohort}_RSID_input
+        """
+
+rule bigBed:
+    output:
+        expand(config['output_dir'] + 'output/{{cohort}}/split_output/raw/{{cohort}}_' + config['output_build']+ '_{{n_files}}.bed')
+    input:
+        rsid = config['output_dir'] + 'input/{cohort}/x{n_files}',
+        dbSNP = '/project/ritchie07/personal/katie/Snakemake_Workflows/bigBed/dbSnp153_' + config['output_build'] + '.bb'
+    params:
+        output_dir = config['output_dir']
+    shell:
+        """
+        if  [ -d {params.output_dir} ]; then
+            if  [ ! -d {params.output_dir}output/ ]; then
+                mkdir {params.output_dir}output/
+                mkdir {params.output_dir}output/{wildcards.cohort}/
+                mkdir {params.output_dir}output/{wildcards.cohort}/split_output/
+                mkdir {params.output_dir}output/{wildcards.cohort}/split_output/raw/
+            elif [ ! -d {params.output_dir}output/{wildcards.cohort}/ ]; then
+                mkdir {params.output_dir}output/{wildcards.cohort}/
+                mkdir {params.output_dir}output/{wildcards.cohort}/split_output/
+                mkdir {params.output_dir}output/{wildcards.cohort}/split_output/raw/
+            elif [ ! -d {params.output_dir}output/{wildcards.cohort}/split_output/ ]; then
+                mkdir {params.output_dir}output/{wildcards.cohort}/split_output/
+                mkdir {params.output_dir}output/{wildcards.cohort}/split_output/raw/
+            elif [ ! -d {params.output_dir}output/{wildcards.cohort}/split_output/raw/ ]; then
+                mkdir {params.output_dir}output/{wildcards.cohort}/split_output/raw/
+            fi
+        else
+            mkdir {params.output_dir}
+            mkdir {params.output_dir}output/
+            mkdir {params.output_dir}output/{wildcards.cohort}/
+            mkdir {params.output_dir}output/{wildcards.cohort}/split_output/
+            mkdir {params.output_dir}output/{wildcards.cohort}/split_output/raw/
+        fi
+        ./bigBedNamedItems -nameFile {input.dbSNP} {input.rsid} {output}
+        """
+
+rule clean_outputs:
+    output:
+        config['output_dir'] + 'output/{cohort}/split_output/cleaned/{cohort}_' + config['output_build'] + '_{n_files}_filtered'
+    input:
+        config['output_dir'] + 'output/{cohort}/split_output/raw/{cohort}_'+ config['output_build'] + '_{n_files}.bed'
+    params:
+        output_dir = config['output_dir']
+    shell:
+        """
+        if  [ -d {params.output_dir} ]; then
+            if  [ ! -d {params.output_dir}output/ ]; then
+                mkdir {params.output_dir}output/
+                mkdir {params.output_dir}output/{wildcards.cohort}/
+                mkdir {params.output_dir}output/{wildcards.cohort}/split_output/
+                mkdir {params.output_dir}output/{wildcards.cohort}/split_output/cleaned/
+            elif [ ! -d {params.output_dir}output/{wildcards.cohort}/ ]; then
+                mkdir {params.output_dir}output/{wildcards.cohort}/
+                mkdir {params.output_dir}output/{wildcards.cohort}/split_output/
+                mkdir {params.output_dir}output/{wildcards.cohort}/split_output/cleaned/
+            elif [ ! -d {params.output_dir}output/{wildcards.cohort}/split_output/ ]; then
+                mkdir {params.output_dir}output/{wildcards.cohort}/split_output/
+                mkdir {params.output_dir}output/{wildcards.cohort}/split_output/cleaned/
+            elif [ ! -d {params.output_dir}output/{wildcards.cohort}/split_output/cleaned ]; then
+                mkdir {params.output_dir}output/{wildcards.cohort}/split_output/cleaned/
+            fi
+        else
+            mkdir {params.output_dir}
+            mkdir {params.output_dir}output/
+            mkdir {params.output_dir}output/{wildcards.cohort}/
+            mkdir {params.output_dir}output/{wildcards.cohort}/split_output/
+            mkdir {params.output_dir}output/{wildcards.cohort}/split_output/cleaned/
+        fi
+        grep -v -E 'K|GL|Un|JH' {input} | awk '{{print $1, $3, $4}}' | sort | uniq > {output}
+        """
+
+rule merge_outputs:
+    output:
+        config['output_dir'] + 'output/{cohort}/merged_output/{cohort}_' + config['output_build'] + '_RSID_merged'
+    input:
+        expand(config['output_dir'] + 'output/{{cohort}}/split_output/cleaned/{{cohort}}_' + config['output_build'] + '_{n_files}_filtered', n_files = n_files)
+    params:
+        output_dir = config['output_dir']
+    shell:
+        """
+        if  [ -d {params.output_dir} ]; then
+            if  [ ! -d {params.output_dir}output/ ]; then
+                mkdir {params.output_dir}output/
+                mkdir {params.output_dir}output/{wildcards.cohort}/
+                mkdir {params.output_dir}output/{wildcards.cohort}/merged_output/
+            elif [ ! -d {params.output_dir}output/{wildcards.cohort}/ ]; then
+                mkdir {params.output_dir}output/{wildcards.cohort}/
+                mkdir {params.output_dir}output/{wildcards.cohort}/merged_output/
+            elif [ ! -d {params.output_dir}output/{wildcards.cohort}/merged_output/ ]; then
+                mkdir {params.output_dir}output/{wildcards.cohort}/merged_output/
+            fi
+        else
+            mkdir {params.output_dir}
+            mkdir {params.output_dir}output/
+            mkdir {params.output_dir}output/{wildcards.cohort}/
+            mkdir {params.output_dir}output/{wildcards.cohort}/merged_output/
+        fi
+        cat {input} > {output}
+        """
+
+rule merge_original_file:
+    output:
+        output= config['output_dir'] + 'output/{cohort}/merged_output/{cohort}_' + config['output_build'] + '_bigBed_output.txt'
+    input:
+        old_build = lambda wildcards: config['input'][wildcards.cohort]['input_filename'],
+        new_build = config['output_dir'] + 'output/{cohort}/merged_output/{cohort}_' + config['output_build'] + '_RSID_merged'
+    params:
+        chr_col = lambda wildcards: config['input'][wildcards.cohort]['chr_col'],
+        rsid_col = lambda wildcards: config['input'][wildcards.cohort]['rsid_col'],
+        pos_col = lambda wildcards: config['input'][wildcards.cohort]['pos_col'],
+        cohort = lambda wildcards: wildcards.cohort,
+        output_dir = config['output_dir']
+    resources:
+        mem_mb = 100000
+    run:
+        import pandas as pd
+        import os
+
+        string1 = params['output_dir']
+        string2 = 'output/'
+        string3 = params['cohort']
+        string4 = '/merged_output/'
+        dir_filepath =string1 + string2 + string3 + string4
+        os.makedirs(dir_filepath,exist_ok = True)
+
+        old_build = pd.read_table(input['old_build'], sep = '\s+', low_memory = False, header = None)
+        new_build = pd.read_table(input['new_build'], sep = '\s+', low_memory = False, header = None)
+
+        old_build.rename(columns ={int(params['chr_col']) - 1 : 'CHR', int(params['pos_col']) - 1 : 'POS', int(params['rsid_col']) - 1 : 'RSID'},  inplace = True)
+        original_column_order = old_build.columns
+        old_build.drop(columns = ['CHR',  'POS'], inplace = True)
+
+        new_build.rename(columns ={0: 'CHR', 1 : 'POS', 2 : 'RSID'}, inplace = True)
+        new_build['CHR'] = new_build['CHR'].str.replace('chr',  '')
+
+        merge = new_build.merge(old_build, how = 'inner', on = 'RSID')
+        merge = merge.reset_index()[original_column_order]
+    
+        merge.to_csv(str(output['output']), sep = '\t',  index = False, header = False)
+
+rule get_failed_outputs:
+    output:
+        config['output_dir'] + 'failed/{cohort}/{cohort}_failed_RSID.txt'
+    input:
+        new_build = config['output_dir'] + 'output/{cohort}/merged_output/{cohort}_' + config['output_build'] + '_RSID_merged',
+        old_build = lambda wildcards: config['input'][wildcards.cohort]['input_filename']
+    params:
+        rsid_col = lambda wildcards: config['input'][wildcards.cohort]['rsid_col'],
+        read_cmd = lambda wildcards: 'zcat' if '.gz' in config['input'][wildcards.cohort]['input_filename'] else 'cat',
+        output_dir = config['output_dir']
+    shell:
+        """
+        if  [ -d {params.output_dir} ]; then
+            if  [ ! -d {params.output_dir}failed/ ]; then
+                mkdir {params.output_dir}failed/
+                mkdir {params.output_dir}failed/{wildcards.cohort}/
+            elif [ ! -d {params.output_dir}failed/{wildcards.cohort}/ ]; then
+                mkdir {params.output_dir}failed/{wildcards.cohort}/
+            fi
+        else
+            mkdir {params.output_dir}
+            mkdir {params.output_dir}failed/ 
+            mkdir {params.output_dir}failed/{wildcards.cohort}/
+        fi
+        if [ ! -d liftover/ ]; then
+            mkdir liftover/
+        fi
+        {params.read_cmd} {input.old_build} > {params.output_dir}output/{wildcards.cohort}/merged_output/{wildcards.cohort}_old_build_temp
+        awk 'NR == FNR {{a[$3]; next}} !(${params.rsid_col} in a)' {input.new_build} {params.output_dir}output/{wildcards.cohort}/merged_output/{wildcards.cohort}_old_build_temp > {output}
+        rm {params.output_dir}output/{wildcards.cohort}/merged_output/{wildcards.cohort}_old_build_temp
+        """
+
+rule clean_merge_bigBed_liftover:
+    output:
+        config['output_dir'] + '{cohort}_' + config['output_build'] + '_bigBed_liftOver_outputs.txt'
+    input:
+        bigBed = config['output_dir'] + 'output/{cohort}/merged_output/{cohort}_' + config['output_build'] + '_bigBed_output.txt',
+        liftover = expand('{file_nickname}.liftover.tsv.gz',file_nickname = config['input_info'])
+    params:
+        output_dir = config['output_dir']
+    shell:
+        """
+        if [ ! -d {params.output_dir} ]; then
+            mkdir {params.output_dir}
+        fi
+        zcat {input.liftover} | grep -v -E 'K|GL|Un|JH' | cat {input.bigBed} | sort | uniq > {output}
+        """

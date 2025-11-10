@@ -1,0 +1,16 @@
+input_build : 'b37'
+output_build : 'b38'
+
+input :
+  cohort_1 :
+    input_filename : 'snpinfo_mult_1kg_hm3'
+    chr_col : '1'
+    rsid_col : '2'
+    pos_col : '3'
+  cohort_2 :
+    input_filename : 'snpinfo_mult_ukbb_hm3'
+    chr_col : '1'
+    rsid_col : '2'
+    pos_col : '3'
+
+output_dir : 'b38_raw_SNP_files'
