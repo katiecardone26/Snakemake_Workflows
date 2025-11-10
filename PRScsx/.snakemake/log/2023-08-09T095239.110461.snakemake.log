@@ -1,6 +1,0 @@
-Building DAG of jobs...
-MissingInputException in rule add_id_to_snp in file /project/ritchie07/personal/katie/Snakemake_Workflows/PRScsx/Snakefile, line 65:
-Missing input files for rule add_id_to_snp:
-    output: ID_Reference/snpinfo_mult_1kg_hm3_id
-    affected files:
-        ID_Reference/snpinfo_mult_1kg_hm3

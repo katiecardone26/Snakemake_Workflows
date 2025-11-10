@@ -1,7 +1,0 @@
-Building DAG of jobs...
-MissingInputException in rule clean_sumstats in file /project/ritchie07/personal/katie/Snakemake_Workflows/PRScsx/Snakefile, line 9:
-Missing input files for rule clean_sumstats:
-    output: /project/ritchie_scratch/katie/ACTG/PRS_Lymph_Count/Sumstats/cleaned_data_PMID_32888493/EUR_hg19_sumstats_cleaned
-    wildcards: ancestry_label=EUR
-    affected files:
-        /project/ritchie_scratch/katie/ACTG/PRS_Lymph_Count/Sumstats/raw_data_PMID_32888493/EUR_32888493-GCST90002315-EFO_0004587-Build37.f.tsv.gz
